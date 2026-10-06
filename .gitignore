@@ -1,0 +1,20 @@
+# Datos de clientes: no se suben al repositorio
+database.db
+*.db
+datos_edificios/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Registros de Streamlit
+streamlit*.log
+
+# Secretos
+.streamlit/secrets.toml
+.env
+
+# Pruebas / herramientas
+.pytest_cache/
