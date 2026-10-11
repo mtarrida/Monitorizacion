@@ -8,6 +8,12 @@ DB = os.environ.get("ENERGIA_DB", "database.db")
 CARPETA_BASE = os.environ.get("ENERGIA_DATOS", "datos_edificios")
 LOGO_PATH = os.path.join("assets", "pgi_logo.png")
 
+
+def url_postgres():
+    """URL de la base de datos PostgreSQL (variable DATABASE_URL). Vacía = se usa SQLite."""
+    return os.environ.get("DATABASE_URL", "").strip()
+
+
 COLOR_CORPORATIVO = "#AB1735"
 COLOR_CORPORATIVO_OSCURO = "#8C1E35"
 COLOR_GRIS_FONDO = "#F6F7F8"

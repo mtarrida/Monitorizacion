@@ -2,13 +2,13 @@
 
 import pandas as pd
 
-from energia.db import cargar_ultimo_bms_mes, conectar_db, meses_bms
+from energia.db import cargar_ultimo_bms_mes, conectar_db, leer_sql, meses_bms
 
 
 def comparativa_mensual(codigo, sim_id, anio, mes):
     conn = conectar_db()
 
-    sim = pd.read_sql_query("""
+    sim = leer_sql("""
         SELECT categoria, consumo_kwh AS simulado_kwh
         FROM simulacion_detalle
         WHERE simulacion_id = ?
@@ -49,7 +49,7 @@ def comparativa_parcial_anual(codigo, sim_id, anio):
         mes = int(row["mes"])
         bms_id = int(row["bms_id"])
 
-        sim = pd.read_sql_query("""
+        sim = leer_sql("""
             SELECT SUM(consumo_kwh) AS total
             FROM simulacion_detalle
             WHERE simulacion_id = ?
@@ -60,7 +60,7 @@ def comparativa_parcial_anual(codigo, sim_id, anio):
         total_sim = sim.iloc[0]["total"]
         total_sim = 0 if pd.isna(total_sim) else total_sim
 
-        bms = pd.read_sql_query("""
+        bms = leer_sql("""
             SELECT SUM(consumo_kwh) AS total
             FROM consumo_bms_detalle
             WHERE consumo_bms_id = ?
@@ -85,7 +85,7 @@ def comparativa_parcial_anual(codigo, sim_id, anio):
     meses_texto = ",".join(str(int(m)) for m in meses["mes"].tolist())
     ids_texto = ",".join(str(int(i)) for i in meses["bms_id"].tolist())
 
-    sim_cat = pd.read_sql_query(f"""
+    sim_cat = leer_sql(f"""
         SELECT categoria, SUM(consumo_kwh) AS simulado_kwh
         FROM simulacion_detalle
         WHERE simulacion_id = ?
@@ -94,7 +94,7 @@ def comparativa_parcial_anual(codigo, sim_id, anio):
         GROUP BY categoria
     """, conn, params=(int(sim_id), int(anio)))
 
-    bms_cat = pd.read_sql_query(f"""
+    bms_cat = leer_sql(f"""
         SELECT categoria, SUM(consumo_kwh) AS real_kwh
         FROM consumo_bms_detalle
         WHERE consumo_bms_id IN ({ids_texto})

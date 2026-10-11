@@ -1,21 +1,166 @@
-"""Acceso a datos (SQLite): edificios, simulaciones y consumos BMS."""
+"""Acceso a datos: edificios, simulaciones y consumos BMS.
 
+Usa SQLite (un archivo local) por defecto, o PostgreSQL si la variable de entorno DATABASE_URL
+está definida (despliegue online). Las consultas se escriben con marcadores `?`; con PostgreSQL
+se traducen a `%s` en _CursorPG.
+"""
+
+import atexit
+import re
 import sqlite3
+import threading
 
 import pandas as pd
 
 from energia import config
 
+_pools = {}
+_pools_lock = threading.Lock()
+_inicializadas = set()
+
+
+def es_postgres():
+    return bool(config.url_postgres())
+
+
+class _CursorPG:
+    """Cursor de psycopg que acepta marcadores `?` como sqlite3."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    @staticmethod
+    def _traducir(sql):
+        return sql.replace("%", "%%").replace("?", "%s")
+
+    def execute(self, sql, params=()):
+        self._cursor.execute(self._traducir(sql), params)
+        return self
+
+    def executemany(self, sql, secuencia):
+        self._cursor.executemany(self._traducir(sql), secuencia)
+        return self
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+
+class _ConexionPG:
+    """Conexión de un grupo (pool) de psycopg que se usa igual que una de sqlite3."""
+
+    def __init__(self, pool, conn):
+        self._pool = pool
+        self._conn = conn
+
+    def cursor(self):
+        return _CursorPG(self._conn.cursor())
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        # Como en sqlite3, lo no confirmado se descarta; después la conexión vuelve al grupo.
+        self._conn.rollback()
+        self._pool.putconn(self._conn)
+
+
+def _pool_pg(url):
+    with _pools_lock:
+        pool = _pools.get(url)
+        if pool is None:
+            # Se importa aquí para que quien use solo SQLite no necesite instalar psycopg.
+            from psycopg_pool import ConnectionPool
+
+            pool = ConnectionPool(
+                url,
+                min_size=1,
+                max_size=5,
+                open=False,
+                kwargs={"prepare_threshold": None},  # compatible con el pooler de Supabase
+                check=ConnectionPool.check_connection,
+            )
+            pool.open(wait=True, timeout=30)
+            _pools[url] = pool
+        return pool
+
+
+@atexit.register
+def cerrar_pools():
+    for pool in _pools.values():
+        pool.close()
+    _pools.clear()
+
 
 def conectar_db():
+    url = config.url_postgres()
+    if url:
+        pool = _pool_pg(url)
+        return _ConexionPG(pool, pool.getconn())
     return sqlite3.connect(config.DB)
 
 
+def leer_sql(sql, conn, params=None):
+    """Como pd.read_sql_query, pero válido para SQLite y PostgreSQL."""
+    if isinstance(conn, sqlite3.Connection):
+        return pd.read_sql_query(sql, conn, params=params)
+
+    cursor = conn.cursor()
+    cursor.execute(sql, params or ())
+    columnas = [d[0] for d in cursor.description]
+    return pd.DataFrame.from_records(cursor.fetchall(), columns=columnas, coerce_float=True)
+
+
+def _ddl(sql):
+    """Adapta el SQL de creación de tablas a PostgreSQL."""
+    if not es_postgres():
+        return sql
+    sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+    return re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql)
+
+
+def _agregar_columna(c, tabla, columna, definicion):
+    if es_postgres():
+        c.execute(_ddl(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna} {definicion}"))
+        return
+
+    try:
+        c.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _insertar_y_obtener_id(c, sql, params):
+    if es_postgres():
+        c.execute(sql + " RETURNING id", params)
+        return c.fetchone()[0]
+
+    c.execute(sql, params)
+    return c.lastrowid
+
+
 def inicializar_db():
+    url = config.url_postgres()
+    if url and url in _inicializadas:
+        return  # en PostgreSQL basta con crear las tablas una vez por proceso
+
     conn = conectar_db()
     c = conn.cursor()
 
-    c.execute("""
+    c.execute(_ddl("""
     CREATE TABLE IF NOT EXISTS edificios (
         codigo_proyecto TEXT PRIMARY KEY,
         nombre TEXT NOT NULL,
@@ -28,9 +173,9 @@ def inicializar_db():
         observaciones TEXT,
         fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    """))
 
-    c.execute("""
+    c.execute(_ddl("""
     CREATE TABLE IF NOT EXISTS simulaciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         codigo_proyecto TEXT NOT NULL,
@@ -39,9 +184,9 @@ def inicializar_db():
         activa INTEGER DEFAULT 0,
         fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    """))
 
-    c.execute("""
+    c.execute(_ddl("""
     CREATE TABLE IF NOT EXISTS simulacion_detalle (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         simulacion_id INTEGER NOT NULL,
@@ -50,9 +195,9 @@ def inicializar_db():
         categoria TEXT NOT NULL,
         consumo_kwh REAL NOT NULL
     )
-    """)
+    """))
 
-    c.execute("""
+    c.execute(_ddl("""
     CREATE TABLE IF NOT EXISTS consumos_bms (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         codigo_proyecto TEXT NOT NULL,
@@ -62,9 +207,9 @@ def inicializar_db():
         descripcion TEXT,
         fecha_importacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    """))
 
-    c.execute("""
+    c.execute(_ddl("""
     CREATE TABLE IF NOT EXISTS consumo_bms_detalle (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         consumo_bms_id INTEGER NOT NULL,
@@ -72,13 +217,10 @@ def inicializar_db():
         consumo_kwh REAL NOT NULL,
         nombre_original_bms TEXT
     )
-    """)
+    """))
 
     for columna in ["electricidad_kwh", "gas_kwh"]:
-        try:
-            c.execute(f"ALTER TABLE consumo_bms_detalle ADD COLUMN {columna} REAL DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
+        _agregar_columna(c, "consumo_bms_detalle", columna, "REAL DEFAULT 0")
 
     nuevas_columnas_edificios = {
         "categoria_edificio": "TEXT",
@@ -91,13 +233,13 @@ def inicializar_db():
     }
 
     for columna, definicion in nuevas_columnas_edificios.items():
-        try:
-            c.execute(f"ALTER TABLE edificios ADD COLUMN {columna} {definicion}")
-        except sqlite3.OperationalError:
-            pass
+        _agregar_columna(c, "edificios", columna, definicion)
 
     conn.commit()
     conn.close()
+
+    if url:
+        _inicializadas.add(url)
 
 
 def cargar_edificios(incluir_archivados=False):
@@ -107,7 +249,7 @@ def cargar_edificios(incluir_archivados=False):
     if not incluir_archivados:
         query = "SELECT * FROM edificios WHERE estado='ACTIVO' ORDER BY nombre"
 
-    df = pd.read_sql_query(query, conn)
+    df = leer_sql(query, conn)
     conn.close()
     return df
 
@@ -278,12 +420,11 @@ def crear_simulacion(codigo, nombre, descripcion, activa):
     if activa:
         c.execute("UPDATE simulaciones SET activa=0 WHERE codigo_proyecto=?", (codigo,))
 
-    c.execute("""
+    sim_id = _insertar_y_obtener_id(c, """
         INSERT INTO simulaciones (codigo_proyecto, nombre_simulacion, descripcion, activa)
         VALUES (?, ?, ?, ?)
     """, (codigo, nombre, descripcion, 1 if activa else 0))
 
-    sim_id = c.lastrowid
     conn.commit()
     conn.close()
     return sim_id
@@ -293,17 +434,21 @@ def guardar_detalle_simulacion(sim_id, df):
     conn = conectar_db()
     c = conn.cursor()
 
-    for _, fila in df.iterrows():
-        c.execute("""
-            INSERT INTO simulacion_detalle (simulacion_id, anio, mes, categoria, consumo_kwh)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
+    filas = [
+        (
             int(sim_id),
             int(fila["anio"]),
             int(fila["mes"]),
             fila["categoria"],
             float(fila["consumo_kwh"]),
-        ))
+        )
+        for _, fila in df.iterrows()
+    ]
+
+    c.executemany("""
+        INSERT INTO simulacion_detalle (simulacion_id, anio, mes, categoria, consumo_kwh)
+        VALUES (?, ?, ?, ?, ?)
+    """, filas)
 
     conn.commit()
     conn.close()
@@ -311,7 +456,7 @@ def guardar_detalle_simulacion(sim_id, df):
 
 def cargar_simulaciones(codigo):
     conn = conectar_db()
-    df = pd.read_sql_query(
+    df = leer_sql(
         "SELECT * FROM simulaciones WHERE codigo_proyecto=? ORDER BY fecha_creacion DESC",
         conn,
         params=(codigo,)
@@ -322,7 +467,7 @@ def cargar_simulaciones(codigo):
 
 def cargar_simulacion_activa(codigo):
     conn = conectar_db()
-    df = pd.read_sql_query(
+    df = leer_sql(
         "SELECT * FROM simulaciones WHERE codigo_proyecto=? AND activa=1 LIMIT 1",
         conn,
         params=(codigo,)
@@ -333,7 +478,7 @@ def cargar_simulacion_activa(codigo):
 
 def cargar_detalle_simulacion(sim_id):
     conn = conectar_db()
-    df = pd.read_sql_query(
+    df = leer_sql(
         "SELECT * FROM simulacion_detalle WHERE simulacion_id=? ORDER BY anio, mes, categoria",
         conn,
         params=(int(sim_id),)
@@ -355,12 +500,11 @@ def crear_consumo_bms(codigo, anio, mes, nombre, descripcion):
     conn = conectar_db()
     c = conn.cursor()
 
-    c.execute("""
+    bms_id = _insertar_y_obtener_id(c, """
         INSERT INTO consumos_bms (codigo_proyecto, anio, mes, nombre_importacion, descripcion)
         VALUES (?, ?, ?, ?, ?)
     """, (codigo, int(anio), int(mes), nombre, descripcion))
 
-    bms_id = c.lastrowid
     conn.commit()
     conn.close()
     return bms_id
@@ -370,21 +514,25 @@ def guardar_detalle_bms(bms_id, df):
     conn = conectar_db()
     c = conn.cursor()
 
-    for _, fila in df.iterrows():
-        c.execute("""
-            INSERT INTO consumo_bms_detalle (
-                consumo_bms_id, categoria, consumo_kwh, nombre_original_bms,
-                electricidad_kwh, gas_kwh
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
+    filas = [
+        (
             int(bms_id),
             fila["categoria"],
             float(fila["consumo_kwh"]),
             fila["nombre_original_bms"],
             float(fila.get("electricidad_kwh", 0)),
             float(fila.get("gas_kwh", 0)),
-        ))
+        )
+        for _, fila in df.iterrows()
+    ]
+
+    c.executemany("""
+        INSERT INTO consumo_bms_detalle (
+            consumo_bms_id, categoria, consumo_kwh, nombre_original_bms,
+            electricidad_kwh, gas_kwh
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, filas)
 
     conn.commit()
     conn.close()
@@ -392,7 +540,7 @@ def guardar_detalle_bms(bms_id, df):
 
 def cargar_consumos_bms(codigo):
     conn = conectar_db()
-    df = pd.read_sql_query(
+    df = leer_sql(
         "SELECT * FROM consumos_bms WHERE codigo_proyecto=? ORDER BY anio DESC, mes DESC, id DESC",
         conn,
         params=(codigo,)
@@ -403,7 +551,7 @@ def cargar_consumos_bms(codigo):
 
 def cargar_detalle_bms(bms_id):
     conn = conectar_db()
-    df = pd.read_sql_query("""
+    df = leer_sql("""
         SELECT 
             categoria,
             consumo_kwh,
@@ -421,7 +569,7 @@ def cargar_detalle_bms(bms_id):
 def cargar_ultimo_bms_mes(codigo, anio, mes):
     conn = conectar_db()
 
-    df = pd.read_sql_query("""
+    df = leer_sql("""
         SELECT 
             cbd.categoria,
             cbd.consumo_kwh AS real_kwh,
@@ -447,7 +595,7 @@ def cargar_ultimo_bms_mes(codigo, anio, mes):
 
 def meses_bms(codigo, anio):
     conn = conectar_db()
-    df = pd.read_sql_query("""
+    df = leer_sql("""
         SELECT mes, MAX(id) AS bms_id
         FROM consumos_bms
         WHERE codigo_proyecto = ?
@@ -468,7 +616,7 @@ def consumos_bms_anio(codigo, anio):
     ids = ",".join(str(int(x)) for x in meses["bms_id"].tolist())
 
     conn = conectar_db()
-    df = pd.read_sql_query(f"""
+    df = leer_sql(f"""
         SELECT 
             cb.mes,
             cbd.categoria,
