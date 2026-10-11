@@ -56,6 +56,11 @@ Para probarla con datos ficticios (edificio `PGI-DEMO-001`, con simulación y 3 
 python -m energia.demo
 ```
 
+## Ponerla online
+
+Se puede publicar en Streamlit Cloud con una base de datos PostgreSQL (Supabase) y acceso con usuario
+y contraseña, para abrirla desde cualquier dispositivo. Guía paso a paso: [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md).
+
 ## Pruebas
 
 ```bash
@@ -63,7 +68,9 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Las pruebas usan una base de datos temporal; nunca tocan la real.
+Las pruebas usan una base de datos temporal; nunca tocan la real. Si defines `TEST_DATABASE_URL` con la
+dirección de una base PostgreSQL **vacía de pruebas** (se borra su contenido en cada prueba), se ejecutan
+también contra PostgreSQL.
 
 ## Estructura del código
 
@@ -71,7 +78,10 @@ Las pruebas usan una base de datos temporal; nunca tocan la real.
 app.py                 Punto de entrada: barra lateral y las 8 pestañas
 energia/
   config.py            Rutas, colores y constantes
-  db.py                Acceso a datos (SQLite)
+  db.py                Acceso a datos (SQLite o PostgreSQL)
+  auth.py              Acceso con usuario y contraseña (opcional)
+  secretos.py          Lectura de los secretos de Streamlit
+  migrar.py            Copia database.db a PostgreSQL
   parsers.py           Lectura de .dat (DesignBuilder) y CSV (BMS)
   analisis.py          Comparativas, alertas e indicadores específicos
   graficos.py          Gráficos Plotly
@@ -90,6 +100,11 @@ ejemplos/              Plantillas y datos de demostración
 |---|---|---|
 | `ENERGIA_DB` | `database.db` | Ruta de la base de datos SQLite |
 | `ENERGIA_DATOS` | `datos_edificios` | Carpeta donde se guardan copias de los archivos importados |
+| `DATABASE_URL` | *(vacía)* | Dirección de PostgreSQL. Si está definida se usa en lugar de SQLite |
+| `ENERGIA_DEMO` | *(vacía)* | Con `1`, crea el edificio de demostración al arrancar si no existe |
+
+Los usuarios con acceso se definen en la tabla `[usuarios]` de los secretos de Streamlit
+(ver `.streamlit/secrets.toml.example`). Sin usuarios, la app se abre sin contraseña.
 
 ## Datos de clientes
 
