@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PGI Energía</title>
+<link rel="icon" href="/assets/pgi_logo.png" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- Franja superior (36 px) como en las apps OU: logo de la empresa, nombre y contexto activo. -->
+<div id="top-bar">
+  <img id="top-logo" src="/assets/pgi_logo.png" alt="PGI Engineering &amp; Consulting" />
+  <span id="top-bar-title">Energía</span>
+  <span id="top-bar-context"></span>
+</div>
+
+<div id="app">
+  <!-- Panel 1: contexto (edificio, año, mes) y los 8 escenarios. -->
+  <aside id="l1-panel" class="panel">
+    <div class="panel-header"><span>Contexto</span></div>
+    <div id="context-box">
+      <label class="campo-ctx">Edificio activo
+        <select id="ctx-edificio"></select>
+      </label>
+      <div class="fila-ctx">
+        <label class="campo-ctx">Año
+          <input id="ctx-anio" type="number" min="2000" max="2100" step="1" />
+        </label>
+        <label class="campo-ctx">Mes
+          <select id="ctx-mes"></select>
+        </label>
+      </div>
+      <div id="ctx-info"></div>
+    </div>
+    <div class="panel-header"><span>Escenarios</span></div>
+    <nav id="scenarios-list" class="scroll-area" aria-label="Escenarios"></nav>
+    <div id="hints">
+      <div><kbd>↑</kbd><kbd>↓</kbd> subescenarios</div>
+      <div><kbd>Ctrl</kbd>+<kbd>↑</kbd><kbd>↓</kbd> escenarios</div>
+      <div><kbd>Ctrl</kbd>+<kbd>←</kbd> cicla paneles</div>
+      <div><kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>←</kbd> pliega todo</div>
+      <div><kbd>Ctrl</kbd>+<kbd>→</kbd> panel de detalle</div>
+      <div><kbd>Ctrl</kbd>+<kbd>/</kbd> paleta de comandos</div>
+    </div>
+  </aside>
+  <div class="splitter" id="l1-splitter">
+    <span class="splitter-fold-btn" id="l1-fold-btn" title="Plegar/desplegar escenarios">◂</span>
+  </div>
+
+  <!-- Panel 2: subescenarios del escenario elegido. -->
+  <aside id="l2-panel" class="panel">
+    <div class="panel-header"><span id="l2-title">Subescenarios</span></div>
+    <nav id="subs-list" class="scroll-area" aria-label="Subescenarios"></nav>
+  </aside>
+  <div class="splitter" id="l2-splitter">
+    <span class="splitter-fold-btn" id="l2-fold-btn" title="Plegar/desplegar subescenarios">◂</span>
+  </div>
+
+  <!-- Canvas: un único subescenario a pantalla completa. -->
+  <main id="canvas-wrap">
+    <div id="canvas-header">
+      <span id="crumb"></span>
+      <span id="canvas-ctx"></span>
+    </div>
+    <div id="canvas"></div>
+  </main>
+
+  <!-- Panel derecho: detalle del elemento elegido en el canvas (p. ej. una celda del mapa de alertas). -->
+  <div class="splitter" id="r1-splitter">
+    <span class="splitter-fold-btn" id="r1-fold-btn" title="Plegar/desplegar el detalle">▸</span>
+  </div>
+  <aside id="r1-panel" class="panel">
+    <div class="panel-header">
+      <span id="r1-title">Detalle</span>
+      <button class="icon-btn" id="r1-cerrar" type="button" title="Cerrar el detalle">✕</button>
+    </div>
+    <div id="r1-body" class="scroll-area"></div>
+  </aside>
+</div>
+
+<div id="toast" hidden></div>
+
+<script src="/vendor/plotly.min.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/shell.js"></script>
+<script src="js/tabla_motor.js"></script>
+<script src="js/alertas.js"></script>
+<script src="js/constructor.js"></script>
+<script src="js/escenarios.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

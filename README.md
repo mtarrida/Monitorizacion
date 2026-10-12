@@ -56,6 +56,43 @@ Para probarla con datos ficticios (edificio `PGI-DEMO-001`, con simulación y 3 
 python -m energia.demo
 ```
 
+## Interfaz web (HTML)
+
+Segunda interfaz, con el aspecto y el manejo de las apps OU: un panel con el contexto y los **8
+escenarios**, un segundo panel con los **subescenarios** del escenario elegido y un canvas limpio
+donde cada subescenario (un gráfico, una tabla o un formulario) ocupa toda la pantalla, sin scroll
+de página. Comparte toda la lógica de `energia/` con la versión Streamlit, que sigue funcionando igual.
+
+```bash
+python servidor.py        # abre http://127.0.0.1:8504
+```
+
+En Windows, `PGI Energia Web.bat` hace lo mismo desde la carpeta de la app. Escucha solo en
+`127.0.0.1` porque esta versión todavía no tiene acceso con usuario y contraseña. Dependencias:
+las de `requirements.txt` (Streamlit ya trae starlette, uvicorn y python-multipart) o `requirements-web.txt`
+si se instala sin Streamlit.
+
+| Atajo | Acción |
+|---|---|
+| `↑` `↓` | Subescenario anterior / siguiente |
+| `Ctrl` + `↑` `↓` (o `Alt` + `1…8`) | Escenario anterior / siguiente (o directo) |
+| `Ctrl` + `←` | Cicla los paneles de la izquierda: ninguno → escenarios → ambos → subescenarios |
+| `Ctrl` + `⇧` + `←` | Pliega todos los paneles de la izquierda |
+| `Ctrl` + `→` / `Ctrl` + `⇧` + `→` | Abre o cierra el panel de detalle de la derecha |
+| `Ctrl` + `/` | Paleta de comandos: ocupa el canvas, se filtra al escribir y aplica el comando sobre la vista actual (comandos del Constructor, ir a cualquier escenario, paneles) |
+| `Esc` | Saca el foco de un campo para volver a usar las flechas |
+
+Dos escenarios son propios de esta interfaz. **Alertas** muestra un mapa de calor de desviaciones
+(categorías × meses, por gravedad); al pulsar un cuadrado, una categoría o un mes, el porqué (datos,
+evolución, posibles causas y qué comprobar) aparece en el panel derecho, y hay un resumen ordenado de
+menos a más graves. **Constructor** enseña los datos mensuales y permite montar gráficos con comandos
+(`/tipo`, `/x`, `/series`, `/categorias`, `/meses`, `/guardar`, `/exportar`…); la configuración y los
+gráficos guardados se recuerdan en el navegador. Las simulaciones `.dat` se importan a mano; los CSV del
+BMS se arrastran a una lista (la columna Origen deja sitio a los que lleguen por correo).
+
+Los paneles también se redimensionan arrastrando el separador y se pliegan con su botón ◂/▸. El
+estado (paneles, anchos, escenario, edificio, año, mes, precios y factores) se recuerda en el navegador.
+
 ## Ponerla online
 
 Se puede publicar en Streamlit Cloud con una base de datos PostgreSQL (Supabase) y acceso con usuario

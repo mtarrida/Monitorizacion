@@ -230,6 +230,9 @@ def inicializar_db():
         "puestos_trabajo": "REAL DEFAULT 0",
         "camas": "REAL DEFAULT 0",
         "horario_uso": "TEXT",
+        # Cómo reconocer el correo que trae los CSV del BMS de este edificio
+        "correo_asunto": "TEXT",
+        "correo_remitente": "TEXT",
     }
 
     for columna, definicion in nuevas_columnas_edificios.items():
@@ -317,6 +320,18 @@ def actualizar_edificio(codigo, datos):
         codigo,
     ))
 
+    conn.commit()
+    conn.close()
+
+
+def guardar_correo_edificio(codigo, asunto, remitente):
+    """Palabras clave con las que se reconoce el correo de este edificio (asunto y remitente)."""
+    conn = conectar_db()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE edificios SET correo_asunto=?, correo_remitente=? WHERE codigo_proyecto=?",
+        (asunto, remitente, codigo),
+    )
     conn.commit()
     conn.close()
 
