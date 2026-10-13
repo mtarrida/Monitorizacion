@@ -241,7 +241,8 @@
     entrada.addEventListener('change', () => { entregar(entrada.files); entrada.value = ''; });
     ['dragenter', 'dragover'].forEach((tipo) => zona.addEventListener(tipo, (e) => { e.preventDefault(); zona.classList.add('encima'); }));
     ['dragleave', 'drop'].forEach((tipo) => zona.addEventListener(tipo, () => zona.classList.remove('encima')));
-    zona.addEventListener('drop', (e) => { e.preventDefault(); entregar(e.dataTransfer.files); });
+    // Lo soltado sobre la zona lo atiende la zona; no llega al reparto general de la ventana (shell.js).
+    zona.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); entregar(e.dataTransfer.files); });
     return zona;
   };
 

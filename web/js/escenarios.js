@@ -15,6 +15,12 @@
   const nombreFichero = (f) => (f ? f.name : '');
   const fila = (campo) => ({ t: campo.t, nodo: campo.input });
 
+  /** Resumen con gráfico: la lista ocupa su altura natural y el gráfico se queda con el hueco que sobra,
+      así las vistas con pocos indicadores no dejan medio canvas vacío. Sin figura, solo la lista. */
+  const resumenConGrafico = (lista, fig) => vista(null, fig
+    ? h('div', { class: 'lista-grafico' }, h('div', { class: 'lista-arriba' }, lista), h('div', { class: 'lista-hueco' }, EN.grafico(fig)))
+    : lista, !fig);
+
   const TEXTO_TONO = { ok: 'Dentro de ±10 %', warn: 'Entre ±10 % y ±20 %', mal: 'Por encima de ±20 %' };
 
   // ----------------------------------------------------------------- Panel
@@ -26,7 +32,7 @@
         id: 'resumen', titulo: 'Resumen',
         render: conDatos('panel', null, (d) => {
           const k = d.kpis;
-          return vista(null, EN.lista([
+          return resumenConGrafico(EN.lista([
             {
               titulo: 'Indicadores',
               filas: [
@@ -48,7 +54,7 @@
                 },
               ],
             },
-          ]), true);
+          ]), d.fig_consumo);
         }),
       },
       {
@@ -270,10 +276,16 @@
           if (!ctx.codigo) return sinEdificio();
           let archivo = null;
           const nombreArchivo = h('div', { class: 'detalle', text: 'Ningún archivo seleccionado' });
-          const zona = EN.zonaArchivos({
-            texto: 'Arrastra aquí el .dat de DesignBuilder', accept: '.dat,.txt', multiple: false,
-            alAnadir: (lista) => { archivo = lista[0]; nombreArchivo.textContent = nombreFichero(archivo); },
-          });
+          const poner = (lista) => {
+            const f = lista.find((x) => /\.(dat|txt)$/i.test(x.name));
+            if (!f) { EN.toast('Aquí va un archivo .dat de DesignBuilder.'); return; }
+            archivo = f;
+            nombreArchivo.textContent = nombreFichero(archivo);
+          };
+          const zona = EN.zonaArchivos({ texto: 'Arrastra aquí el .dat de DesignBuilder', accept: '.dat,.txt', multiple: false, alAnadir: poner });
+          EN.receptores = { dat: poner };
+          const pendiente = EN.recogerArchivos('dat');
+          if (pendiente.length) poner(pendiente);
           const campos = {
             nombre: EN.campo({ name: 'nombre', t: 'Nombre de la simulación', valor: 'Simulación DesignBuilder' }),
             anio: EN.campo({ name: 'anio', t: 'Año', tipo: 'number', min: 2000, max: 2100, paso: 1, valor: ctx.anio }),
@@ -354,8 +366,21 @@
   // ------------------------------------------------------------------- BMS
 
   /** Lista de CSV para importar (arrastrar y soltar o elegir). La columna Origen deja sitio a los que lleguen por correo. */
-  function bandejaCsv(ctx) {
-    const items = [];
+  async function bandejaCsv(ctx) {
+    // CSV que han llegado por correo y esperan en la bandeja de este edificio (si el correo falla, la lista manual sigue).
+    let recibidos = [];
+    let correoEstado = { configurado: false };
+    try {
+      [recibidos, correoEstado] = await Promise.all([
+        EN.api(`/api/bandeja?${EN.qs({ codigo: ctx.codigo })}`).then((r) => r.items),
+        EN.api('/api/correo/estado'),
+      ]);
+    } catch (e) { /* sin correo */ }
+    const fechaCorta = (iso) => (iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '');
+    const items = recibidos.map((r) => ({
+      archivo: { name: r.archivo }, origen: 'Correo', mes: r.mes, anio: r.anio, bandejaId: r.id, estado: 'pendiente', mensaje: '',
+      detalle: `${r.asunto} · ${fechaCorta(r.recibido)} · año ${r.anio}`,
+    }));
     const opcionesMes = EN.cfg.meses.map((m) => ({ v: m.num, t: `${String(m.num).padStart(2, '0')} - ${m.nombre}` }));
     const detectarMes = (nombre) => {
       const m = /(20\d{2})[_\-.](0?[1-9]|1[0-2])(?!\d)/.exec(nombre);
@@ -374,14 +399,20 @@
       it.estado = 'importando';
       it.mensaje = '';
       pintar();
-      const datos = new FormData();
-      datos.set('codigo', ctx.codigo);
-      datos.set('anio', ctx.anio);
-      datos.set('meses', JSON.stringify([it.mes]));
-      datos.set('descripcion', `Importación desde la lista (${it.origen})`);
-      datos.append('archivos', it.archivo, it.archivo.name);
       try {
-        const r = await EN.api('/api/bms', { method: 'POST', form: datos });
+        let r;
+        if (it.bandejaId) {
+          // Viene del correo: el archivo ya está en el servidor.
+          r = await EN.api('/api/bandeja/importar', { method: 'POST', json: { codigo: ctx.codigo, id: it.bandejaId, anio: it.anio, mes: it.mes } });
+        } else {
+          const datos = new FormData();
+          datos.set('codigo', ctx.codigo);
+          datos.set('anio', ctx.anio);
+          datos.set('meses', JSON.stringify([it.mes]));
+          datos.set('descripcion', `Importación desde la lista (${it.origen})`);
+          datos.append('archivos', it.archivo, it.archivo.name);
+          r = await EN.api('/api/bms', { method: 'POST', form: datos });
+        }
         const x = r.resultados[0];
         if (x.ok) {
           it.estado = 'importado';
@@ -398,6 +429,16 @@
       pintar();
     }
 
+    async function quitar(it) {
+      if (it.bandejaId && it.estado !== 'importado') {
+        try {
+          await EN.api('/api/bandeja/descartar', { method: 'POST', json: { codigo: ctx.codigo, id: it.bandejaId } });
+        } catch (e) { EN.toast(e.message, 4000); return; }
+      }
+      items.splice(items.indexOf(it), 1);
+      pintar();
+    }
+
     function filaItem(it) {
       const [tono, texto] = ESTADOS[it.estado];
       const cerrada = it.estado === 'importado' || it.estado === 'importando';
@@ -405,13 +446,17 @@
       mes.value = String(it.mes);
       mes.addEventListener('change', () => { it.mes = Number(mes.value); });
       return h('tr', {},
-        h('td', { text: it.archivo.name }),
+        h('td', {}, it.archivo.name, it.detalle ? h('div', { class: 'detalle', text: it.detalle }) : null),
         h('td', { text: it.origen }),
         h('td', {}, mes),
         h('td', {}, tono ? h('span', { class: `punto ${tono}`, 'aria-hidden': 'true' }) : null, texto, it.mensaje ? h('div', { class: 'detalle', text: it.mensaje }) : null),
         h('td', {}, h('div', { class: 'acciones-fila' },
           h('button', { class: 'btn-primary', type: 'button', text: 'Importar', disabled: cerrada, onclick: () => importar(it) }),
-          h('button', { class: 'btn-secondary', type: 'button', text: 'Quitar', disabled: it.estado === 'importando', onclick: () => { items.splice(items.indexOf(it), 1); pintar(); } }))));
+          h('button', {
+            class: 'btn-secondary', type: 'button', text: it.bandejaId ? 'Descartar' : 'Quitar', disabled: it.estado === 'importando',
+            title: it.bandejaId ? 'Lo saca de la bandeja sin importarlo (el archivo se conserva)' : '',
+            onclick: () => quitar(it),
+          }))));
     }
 
     function pintar() {
@@ -427,15 +472,14 @@
     });
     botonVaciar.addEventListener('click', () => { items.splice(0, items.length); pintar(); });
 
-    const zona = EN.zonaArchivos({
-      texto: 'Arrastra aquí los CSV del BMS', accept: '.csv', multiple: true,
-      alAnadir: (lista) => {
-        const validos = lista.filter((f) => /\.csv$/i.test(f.name));
-        if (validos.length < lista.length) EN.toast('Solo se admiten archivos .csv.');
-        validos.forEach((archivo) => items.push({ archivo, origen: 'Manual', mes: detectarMes(archivo.name), estado: 'pendiente', mensaje: '' }));
-        pintar();
-      },
-    });
+    const anadir = (lista) => {
+      const validos = lista.filter((f) => /\.csv$/i.test(f.name));
+      if (validos.length < lista.length) EN.toast('Solo se admiten archivos .csv.');
+      validos.forEach((archivo) => items.push({ archivo, origen: 'Manual', mes: detectarMes(archivo.name), estado: 'pendiente', mensaje: '' }));
+      pintar();
+    };
+    const zona = EN.zonaArchivos({ texto: 'Arrastra aquí los CSV del BMS', accept: '.csv', multiple: true, alAnadir: anadir });
+    EN.receptores = { csv: anadir };
 
     // Cómo se reconoce el correo que trae los CSV de este edificio (se guarda al salir de cada campo).
     const asunto = EN.campo({ name: 'correo_asunto', t: 'Palabras clave del asunto', valor: (ctx.edificio && ctx.edificio.correo_asunto) || '', ph: 'Ej. CSV monitorización' });
@@ -451,18 +495,38 @@
       }
     };
     [asunto, remitente].forEach((c) => c.input.addEventListener('change', guardarCorreo));
+
+    const botonRevisar = h('button', { class: 'btn-secondary', type: 'button', text: 'Revisar correo ahora' });
+    botonRevisar.addEventListener('click', async () => {
+      botonRevisar.disabled = true;
+      try {
+        const r = await EN.api('/api/correo/revisar', { method: 'POST', json: {} });
+        EN.toast(r.nuevos ? `${r.nuevos} CSV nuevo(s) en la bandeja.` : 'No hay correos nuevos para este edificio.', 4000);
+        EN.refrescar();
+      } catch (e) { EN.toast(e.message, 6000); } finally { botonRevisar.disabled = false; }
+    });
+    const textoBuzon = !correoEstado.configurado
+      ? 'Sin configurar: faltan las variables ENERGIA_IMAP_… en el equipo del servidor'
+      : `${correoEstado.buzon} · ${correoEstado.ultima_revision ? `última revisión ${fechaCorta(correoEstado.ultima_revision)}` : 'aún sin revisar'}`
+        + `${correoEstado.automatico_cada_min ? ` · automática cada ${correoEstado.automatico_cada_min} min` : ''}`
+        + `${correoEstado.error ? ` · error: ${correoEstado.error}` : ''}`;
+    const tonoBuzon = correoEstado.error ? 'mal' : correoEstado.configurado ? 'ok' : 'warn';
+
     const correo = h('div', {},
       EN.lista([{
         titulo: `Correo de origen · ${ctx.codigo}`,
         filas: [
           fila(asunto),
           fila(remitente),
-          { t: 'Cómo se usa', v: 'Los correos cuyo asunto contenga todas las palabras clave (y cuyo remitente coincida, si lo rellenas) aportarán sus CSV a este edificio.' },
+          { t: 'Buzón', v: textoBuzon, tono: tonoBuzon },
+          { t: 'Revisar', nodo: botonRevisar },
+          { t: 'Cómo se usa', v: 'Los correos cuyo asunto contenga todas las palabras clave (y cuyo remitente coincida, si lo rellenas) dejan sus CSV en la lista, con origen Correo, para importarlos o descartarlos.' },
         ],
       }]),
       guardado);
 
     pintar();
+    anadir(EN.recogerArchivos('csv'));
     return vista(
       h('div', { class: 'barra-herramientas' }, h('span', { class: 'detalle', text: `Destino: ${ctx.codigo} · año ${ctx.anio}. El mes se propone a partir del nombre del archivo.` })),
       h('div', { class: 'bandeja' }, correo, zona, vacio, tabla, h('div', { class: 'acciones' }, botonTodos, botonVaciar)), true);
@@ -508,7 +572,7 @@
   const resumenMes = conDatos('comparativa/mes', null, (d) => {
     const k = d.kpis;
     const tono = EN.tonoDesviacion(k.desviacion_pct);
-    return vista(null, EN.lista([
+    return resumenConGrafico(EN.lista([
       {
         titulo: 'Indicadores',
         filas: [
@@ -525,13 +589,13 @@
           { t: 'Estado de la desviación', v: TEXTO_TONO[tono], tono },
         ],
       },
-    ]), true);
+    ]), d.fig_barras);
   });
 
   const resumenAcumulada = conDatos('comparativa/acumulada', null, (d) => {
     const k = d.kpis;
     const tono = EN.tonoDesviacion(k.desviacion_pct);
-    return vista(null, EN.lista([
+    return resumenConGrafico(EN.lista([
       {
         titulo: 'Indicadores',
         filas: [
@@ -549,7 +613,7 @@
           { t: 'Estado de la desviación', v: TEXTO_TONO[tono], tono },
         ],
       },
-    ]), true);
+    ]), d.fig_evolucion);
   });
 
   const graf = (ruta, clave) => conDatos(ruta, null, (d) => vista(null, EN.grafico(d[clave])));
@@ -685,10 +749,10 @@
       subs: [
         {
           id: 'resumen', titulo: 'Parámetros y resumen',
-          render: datos((d) => vista(null, EN.lista([
+          render: datos((d) => resumenConGrafico(EN.lista([
             { titulo: 'Parámetros', filas: filasParametros(o.parametros) },
             { titulo: 'Resumen del año', filas: o.filas(d.kpis) },
-          ]), true)),
+          ]), d.fig_mes)),
         },
         { id: 'mes-grafico', grupo: 'Mensual', titulo: `${o.nombre} mensual`, render: datos((d) => vista(null, EN.grafico(d.fig_mes))) },
         { id: 'mes-tabla', grupo: 'Mensual', titulo: 'Tabla mensual', render: datos((d) => vista(null, EN.tabla(d.tabla_mes))) },

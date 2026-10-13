@@ -1,9 +1,0 @@
-# Interfaz web (servidor.py). Si ya instalaste requirements.txt, Streamlit trae starlette, uvicorn y
-# python-multipart, y no hace falta nada más.
-pandas>=2.0
-plotly>=5.18
-starlette>=0.40
-uvicorn>=0.30
-python-multipart>=0.0.9
-psycopg[binary]>=3.2
-psycopg_pool>=3.2

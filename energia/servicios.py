@@ -1,6 +1,6 @@
 """Servicios de la interfaz web: reúnen datos y figuras listos para enviar como JSON.
 
-Sin Streamlit. Cada función recibe valores simples y devuelve diccionarios o listas
+Cada función recibe valores simples y devuelve diccionarios o listas
 serializables. Si falta un dato previo (edificio, simulación activa, BMS) devuelve
 `{"aviso": "..."}` para que la interfaz lo muestre en el canvas en lugar de un error. Los
 errores de validación se lanzan como `ValueError` con un mensaje apto para el usuario.
@@ -11,7 +11,7 @@ import os
 
 import pandas as pd
 
-from energia import config, figuras
+from energia import buzon, config, figuras
 from energia.analisis import (
     comparativa_mensual,
     comparativa_parcial_anual,
@@ -73,7 +73,7 @@ def _aviso(mensaje):
 
 
 class _Archivo:
-    """Imita el archivo subido de Streamlit (los lectores solo usan getvalue)."""
+    """Imita un archivo subido (los lectores solo usan getvalue)."""
 
     def __init__(self, contenido, nombre="archivo"):
         self.contenido = contenido
@@ -360,6 +360,51 @@ def importar_bms(codigo, anio, entradas):
         resultados.append({"archivo": archivo, "ok": True, "bms_id": bms_id, "mes": mes, "filas": len(df)})
 
     return {"resultados": resultados, "importados": sum(1 for r in resultados if r["ok"])}
+
+
+# ---------------------------------------------------------------------------
+# Correo: CSV del BMS recibidos en el buzón (ver buzon.py)
+# ---------------------------------------------------------------------------
+
+def correo_estado():
+    return buzon.estado()
+
+
+def revisar_correo():
+    return buzon.revisar_buzon()
+
+
+def bandeja(codigo):
+    """CSV recibidos por correo para este edificio, pendientes de importar o descartar."""
+    edificio = _edificio(codigo)
+    if edificio is None:
+        raise ValueError("Elige un edificio.")
+    return {"items": buzon.listar_bandeja(codigo, edificio["nombre"])}
+
+
+def importar_de_bandeja(codigo, id_correo, anio, mes):
+    """Importa un CSV de la bandeja como si se hubiera subido a mano; si sale bien, sale de la bandeja."""
+    edificio = _edificio(codigo)
+    if edificio is None:
+        raise ValueError("Elige un edificio.")
+    contenido, datos = buzon.leer_de_bandeja(codigo, edificio["nombre"], id_correo)
+    resultado = importar_bms(codigo, int(anio), [{
+        "mes": mes,
+        "archivo": datos.get("archivo", "correo.csv"),
+        "contenido": contenido,
+        "descripcion": f"Recibido por correo: {datos.get('asunto', '')}".strip(),
+    }])
+    if resultado["importados"]:
+        buzon.retirar_de_bandeja(codigo, edificio["nombre"], id_correo, "importados")
+    return resultado
+
+
+def descartar_de_bandeja(codigo, id_correo):
+    edificio = _edificio(codigo)
+    if edificio is None:
+        raise ValueError("Elige un edificio.")
+    buzon.retirar_de_bandeja(codigo, edificio["nombre"], id_correo, "descartados")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-"""Figuras Plotly de la aplicación, sin Streamlit.
+"""Figuras Plotly de la aplicación.
 
-Las usan `graficos.py` (interfaz Streamlit) y `servicios.py` (interfaz web). Cada función
+Las usa `servicios.py` (interfaz web). Cada función
 devuelve una `go.Figure`, o `None` si no hay datos que dibujar. `altura=None` deja que el
 contenedor decida el alto (la interfaz web las dibuja a todo el canvas).
 """
@@ -13,6 +13,8 @@ from energia.config import COLOR_CORPORATIVO, MESES
 COLOR_SIMULADO = "#A7B0BE"
 COLOR_GRIS_OSCURO = "#4B5563"
 COLOR_TEXTO = "#23272F"
+# Una serie por categoría de edificio: carmesí corporativo y grises, nunca el azul por defecto de Plotly.
+SECUENCIA_CATEGORIAS = [COLOR_CORPORATIVO, COLOR_GRIS_OSCURO, "#D98A9B", COLOR_SIMULADO, "#6B7280", "#E8B8C2"]
 
 
 def _vacio(df):
@@ -138,8 +140,14 @@ def fig_ranking_indicadores(df, titulo, altura=None):
         orientation="h",
         title=titulo,
         labels={"indicador_especifico": "Indicador específico", "nombre": "", "categoria_edificio": "Categoría"},
+        color_discrete_sequence=SECUENCIA_CATEGORIAS,
     )
-    fig.update_layout(height=altura, margin=dict(l=10, r=10, t=55, b=10))
+    # Con pocos edificios las barras no deben llenar todo el alto: se reservan al menos 6 huecos, con el
+    # primero del ranking arriba, y las barras quedan separadas.
+    n = df["nombre"].nunique()
+    huecos = max(n, 6)
+    fig.update_yaxes(range=[n - 0.5 - huecos, n - 0.5])
+    fig.update_layout(height=altura, margin=dict(l=10, r=10, t=55, b=10), bargap=0.4)
     return fig
 
 

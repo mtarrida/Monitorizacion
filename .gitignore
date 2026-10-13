@@ -9,11 +9,7 @@ __pycache__/
 .venv/
 venv/
 
-# Registros de Streamlit
-streamlit*.log
-
 # Secretos
-.streamlit/secrets.toml
 .env
 
 # Pruebas / herramientas

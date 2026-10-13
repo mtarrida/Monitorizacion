@@ -30,7 +30,7 @@ BMS_DEMO = [
 
 
 class ArchivoLocal:
-    """Imita el archivo subido de Streamlit (los lectores solo usan getvalue)."""
+    """Imita un archivo subido (los lectores solo usan getvalue)."""
 
     def __init__(self, ruta):
         self.ruta = ruta

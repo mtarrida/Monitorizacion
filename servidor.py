@@ -2,7 +2,7 @@
 
 Uso:  python servidor.py        ->  http://127.0.0.1:8504
 
-Sirve la carpeta `web/` y una API JSON que reutiliza la lógica de `energia/` (sin Streamlit).
+Sirve la carpeta `web/` y una API JSON que reutiliza la lógica de `energia/`.
 Escucha solo en 127.0.0.1 porque esta versión todavía no tiene acceso con usuario y contraseña.
 """
 import json
@@ -22,8 +22,9 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from energia import servicios
+from energia import buzon, servicios
 from energia.db import inicializar_db
+from energia.demo import crear_demo
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PUERTO = int(os.environ.get("ENERGIA_PUERTO", "8504"))
@@ -193,6 +194,36 @@ async def r_bms_importar(request):
 
 
 # ---------------------------------------------------------------------------
+# Correo (CSV del BMS recibidos por email)
+# ---------------------------------------------------------------------------
+
+async def r_correo_estado(request):
+    return await run_in_threadpool(servicios.correo_estado)
+
+
+async def r_correo_revisar(request):
+    return await run_in_threadpool(servicios.revisar_correo)
+
+
+async def r_bandeja(request):
+    return await run_in_threadpool(servicios.bandeja, request.query_params.get("codigo"))
+
+
+async def r_bandeja_importar(request):
+    datos = await _cuerpo_json(request)
+    try:
+        anio, mes = int(datos.get("anio")), int(datos.get("mes"))
+    except (TypeError, ValueError):
+        raise ValueError("Faltan el año y el mes de la importación.")
+    return await run_in_threadpool(servicios.importar_de_bandeja, datos.get("codigo"), datos.get("id"), anio, mes)
+
+
+async def r_bandeja_descartar(request):
+    datos = await _cuerpo_json(request)
+    return await run_in_threadpool(servicios.descartar_de_bandeja, datos.get("codigo"), datos.get("id"))
+
+
+# ---------------------------------------------------------------------------
 # Comparativa, informe, costes y CO2
 # ---------------------------------------------------------------------------
 
@@ -266,7 +297,13 @@ class SinCache(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app):
     inicializar_db()
+    # Para una primera prueba: con ENERGIA_DEMO=1 se crea el edificio de demostración si no existe.
+    if os.environ.get("ENERGIA_DEMO") == "1":
+        crear_demo()
+    parar_correo = buzon.iniciar_vigilante()  # solo si hay buzón configurado y ENERGIA_IMAP_MINUTOS > 0
     yield
+    if parar_correo is not None:
+        parar_correo.set()
 
 
 RUTAS = [
@@ -286,6 +323,11 @@ RUTAS = [
     Route("/api/bms", api(r_bms)),
     Route("/api/bms", api(r_bms_importar), methods=["POST"]),
     Route("/api/bms/{bms_id:int}/detalle", api(r_bms_detalle)),
+    Route("/api/correo/estado", api(r_correo_estado)),
+    Route("/api/correo/revisar", api(r_correo_revisar), methods=["POST"]),
+    Route("/api/bandeja", api(r_bandeja)),
+    Route("/api/bandeja/importar", api(r_bandeja_importar), methods=["POST"]),
+    Route("/api/bandeja/descartar", api(r_bandeja_descartar), methods=["POST"]),
     Route("/api/comparativa/mes", api(r_comparativa_mes)),
     Route("/api/comparativa/acumulada", api(r_comparativa_acumulada)),
     Route("/api/comparativa/base", api(r_comparativa_base)),

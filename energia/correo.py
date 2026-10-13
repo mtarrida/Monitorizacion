@@ -1,6 +1,6 @@
 """Reconocer qué correos traen los CSV del BMS de cada edificio.
 
-Solo lógica pura (sin red ni Streamlit): decide si un correo concreto corresponde a la regla de
+Solo lógica pura (sin red): decide si un correo concreto corresponde a la regla de
 un edificio. La lectura del buzón se montará encima de esto. Una regla tiene dos campos:
 
 - `asunto`: palabras clave que deben aparecer TODAS en el asunto (da igual el orden, las

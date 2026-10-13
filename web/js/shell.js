@@ -11,7 +11,7 @@
 
   const CLAVE = 'pgiEnergiaUI';
   const DEF = {
-    l1: true, l2: true, r1: false, w1: 230, w2: 250, w3: 420,
+    l1: true, l2: true, r1: false, w1: 270, w2: 250, w3: 420,
     esc: 'panel', sub: {},
     codigo: null, anio: null, mes: 1,
     params: { precioElec: 0.18, precioGas: 0.07, factorElec: 0.18, factorGas: 0.20 },
@@ -24,6 +24,7 @@
     Object.assign(E, DEF, guardado);
     E.params = Object.assign({}, DEF.params, guardado.params);
     E.sub = Object.assign({}, guardado.sub);
+    if (guardado.w1 === 230) E.w1 = DEF.w1; // el ancho de antes cortaba el nombre del edificio
   };
 
   let pendiente = null;
@@ -182,6 +183,7 @@
     EN.limpiarGraficos();
     EN.detalle.limpiar();
     EN.comandosVista = null;
+    EN.receptores = null;
     EN.paleta.abortar();
     const canvas = $('canvas');
     canvas.replaceChildren(h('div', { class: 'cargando', text: 'Cargando…' }));
@@ -247,7 +249,6 @@
 
   function pintarTextoContexto() {
     $('top-bar-context').textContent = textoContexto();
-    $('canvas-ctx').textContent = textoContexto();
   }
 
   let fichaInfo = 0;
@@ -279,6 +280,7 @@
     if (!EN.edificios.length) sel.appendChild(h('option', { value: '', text: '— sin edificios —' }));
     EN.edificios.forEach((e) => sel.appendChild(h('option', { value: e.codigo_proyecto, text: `${e.codigo_proyecto} - ${e.nombre}` })));
     sel.value = E.codigo || '';
+    sel.title = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '';
   }
 
   EN.recargarEdificios = async function () {
@@ -359,6 +361,44 @@
     if (elegido) await elegido.run();
   };
 
+  // ------------------------------------------------------------------ archivos soltados en la ventana
+
+  /** Se puede soltar un archivo en cualquier parte de la ventana: un .csv va a BMS › Importar CSV y un .dat a
+      Simulaciones › Importar. Si la vista activa es ya la de importación, lo recibe ella (EN.receptores, que fija
+      la propia vista); si no, queda pendiente (EN.recogerArchivos) y se navega hasta allí. */
+  const entrantes = { csv: [], dat: [] };
+  const tipoArchivo = (f) => (/\.csv$/i.test(f.name) ? 'csv' : /\.(dat|txt)$/i.test(f.name) ? 'dat' : null);
+  const DESTINO = { csv: ['bms', 'importar', 'BMS › Importar CSV'], dat: ['simulaciones', 'importar', 'Simulaciones › Importar .dat'] };
+  EN.receptores = null;
+  EN.recogerArchivos = (tipo) => entrantes[tipo].splice(0);
+
+  function recibirArchivos(lista) {
+    const porTipo = { csv: [], dat: [] };
+    const raros = [];
+    lista.forEach((f) => { const t = tipoArchivo(f); if (t) porTipo[t].push(f); else raros.push(f.name); });
+    if (raros.length) EN.toast(`No sé qué hacer con ${raros.join(', ')}: admito .csv (BMS) y .dat (simulación).`, 4500);
+    if (porTipo.dat.length > 1) { EN.toast('Solo se importa un .dat cada vez: me quedo con el primero.', 4000); porTipo.dat.length = 1; }
+    const tipos = ['csv', 'dat'].filter((t) => porTipo[t].length);
+    let destino = null;
+    tipos.forEach((t) => {
+      if (EN.receptores && EN.receptores[t]) EN.receptores[t](porTipo[t]);
+      else { entrantes[t].push(...porTipo[t]); destino = destino || t; }
+    });
+    if (destino) EN.irA(DESTINO[destino][0], DESTINO[destino][1]);
+    const otro = tipos.find((t) => t !== destino && entrantes[t].length);
+    if (destino && otro) EN.toast(`El archivo ${otro === 'dat' ? '.dat' : '.csv'} espera en ${DESTINO[otro][2]}.`, 4500);
+  }
+
+  function activarSoltarArchivos() {
+    let nivel = 0;
+    const conArchivos = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const fuera = () => { nivel = 0; document.body.classList.remove('soltando'); };
+    window.addEventListener('dragenter', (e) => { if (!conArchivos(e)) return; e.preventDefault(); nivel += 1; document.body.classList.add('soltando'); });
+    window.addEventListener('dragover', (e) => { if (!conArchivos(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    window.addEventListener('dragleave', (e) => { if (!conArchivos(e)) return; nivel = Math.max(0, nivel - 1); if (!nivel) fuera(); });
+    window.addEventListener('drop', (e) => { if (!conArchivos(e)) return; e.preventDefault(); fuera(); recibirArchivos([...e.dataTransfer.files]); });
+  }
+
   // ------------------------------------------------------------------ teclado
 
   const esTexto = (el) => el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && ['text', 'number', 'search'].includes(el.type)));
@@ -424,5 +464,6 @@
     $('r1-cerrar').addEventListener('click', () => EN.setPanel('r1', false));
     EN.detalle.limpiar();
     document.addEventListener('keydown', alPulsarTecla, true);
+    activarSoltarArchivos();
   };
 })();

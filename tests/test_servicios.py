@@ -1,4 +1,4 @@
-"""Pruebas de la capa de servicios de la interfaz web (sin Streamlit ni servidor)."""
+"""Pruebas de la capa de servicios de la interfaz web (sin servidor)."""
 import json
 import os
 

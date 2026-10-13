@@ -8,7 +8,7 @@ from energia.demo import crear_demo
 
 
 class ArchivoFalso:
-    """Imita el archivo subido de Streamlit (los lectores solo usan getvalue)."""
+    """Imita un archivo subido (los lectores solo usan getvalue)."""
 
     def __init__(self, contenido, nombre="archivo"):
         self.contenido = contenido.encode("utf-8") if isinstance(contenido, str) else contenido
